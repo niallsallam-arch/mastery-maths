@@ -3,6 +3,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, Button, Card, FractionBar, SpeakButton, speak } from "@/components/ui";
+import { levelOf } from "@/lib/level";
 
 type Item = { id: string; mode: string; skillTitle?: string; grade?: number; prompt: string; speak: string; kind: string; choices?: string[]; unit?: string; visual?: { type: "fractionBar"; parts: number; shaded: number }; progress?: { idx: number; total: number } };
 type Intro = { grade: number; total: number; reward: number; currency: string; retake: boolean };
@@ -192,7 +193,7 @@ function Session() {
       {phase === "intro" && intro && (
         <Card className="pop text-center py-10">
           <div className="text-soft uppercase tracking-wider text-sm">{intro.retake ? "Retake" : "Challenge"}</div>
-          <h2 className="text-4xl font-semibold my-2">Grade {intro.grade}</h2>
+          <h2 className="text-4xl font-semibold my-2">Level {levelOf(intro.grade)}</h2>
           <p className="text-xl mb-1">{intro.total} questions. Get every one right to pass.</p>
           {intro.reward > 0 && <p className="text-2xl font-semibold text-gold mb-6">100% earns {intro.currency}{intro.reward}</p>}
           <p className="text-soft mb-6">No rush. You can stop part way and carry on next time.</p>
@@ -204,13 +205,13 @@ function Session() {
         <Card className="pop text-center py-10">
           {result.event.passed ? (
             <>
-              <h2 className="text-4xl font-semibold mb-2">Grade {result.event.grade}: 100%</h2>
+              <h2 className="text-4xl font-semibold mb-2">Level {levelOf(result.event.grade)}: 100%</h2>
               {result.event.reward > 0 && <p className="text-3xl font-semibold text-gold mb-4">You earned {result.event.currency}{result.event.reward}</p>}
-              <p className="text-xl mb-6">Passed. On to Grade {Math.min(8, result.event.grade + 1)}.</p>
+              <p className="text-xl mb-6">{result.event.grade >= 8 ? "Passed. That is every level." : `Passed. On to Level ${levelOf(result.event.grade + 1)}.`}</p>
             </>
           ) : (
             <>
-              <h2 className="text-3xl font-semibold mb-2">Grade {result.event.grade}: {result.event.correct} of {result.event.total}</h2>
+              <h2 className="text-3xl font-semibold mb-2">Level {levelOf(result.event.grade)}: {result.event.correct} of {result.event.total}</h2>
               <p className="text-xl mb-2">{result.event.total - result.event.correct <= 3 ? "Close." : "Good map of where to work."} Fill these, then retake for the 100:</p>
               <ul className="mb-6">{result.event.holes.map((h: string) => <li key={h} className="text-lg">• {h}</li>)}</ul>
             </>

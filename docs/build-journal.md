@@ -62,3 +62,13 @@ Claude: at the end of any session that changes the project, add a dated entry he
 - Ask Claude to read the code for deploy problems before starting. It found two things the Vercel screens would not have flagged: the install command needed a flag, and the app would not complain about a missing session secret.
 - A spend limit and a prepaid balance on the API account cap the cost if a key ever leaks.
 - Going one step at a time, with a confirmation between each, meant nothing had to be undone.
+
+## 2026-11-19 · 5. Grades become Levels on Amira's screens
+
+**Why.** The home page listed Grade 3, Grade 4, Grade 5 and so on with a reward under each. A Grade 8 student could fairly read that as "I am being sent back to Grade 3" and switch off before starting. The work is the same; the label was the problem.
+
+**What changed.** Everything Amira sees now says Level 1 to Level 6 in place of Grade 3 to Grade 8: the reward ladder, the "next up" line, the hours estimate, and the challenge start, pass and retake screens. The parent dashboard and the stored data still use real grades, because that is what matches the BC curriculum. One small file, `src/lib/level.ts`, holds the mapping, so it can be changed in one place.
+
+**How it was checked.** Type check, the 131 tests, a production build, and a screenshot of the home page logged in as the student.
+
+**Lesson.** Wording is a design decision. The same ladder motivates or deflates depending on what the rungs are called, and the person who knows the student is the one who spots it.

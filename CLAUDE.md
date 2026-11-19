@@ -46,6 +46,7 @@ Goal: take her through Grades 3 to 8 to genuine mastery, so she is solid at Grad
 - Canadian/British spelling in all UI copy. No m-dashes. Plain, calm, no superlatives.
 - Any new skill needs: prerequisites, a generator for levels 1–3, steps, and must pass the generator tests.
 - Never let the AI decide correctness.
+- Student-facing copy never says "Grade". Grades 3–8 are shown to Amira as Levels 1–6 via `src/lib/level.ts`. The parent dashboard and the data keep real grades.
 
 ## Status and next phases
 - Phase 1 done: skill map (number, operations, fractions, decimals and percents, algebra, plus circles, squares/roots, Pythagoras), engine, sessions, challenges, rewards, parent dashboard.
