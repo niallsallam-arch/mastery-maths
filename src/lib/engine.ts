@@ -8,6 +8,7 @@
 import { randomUUID } from "crypto";
 import { SKILLS, SKILL, skillsInGrade, GRADES, Problem } from "./skills";
 import { check } from "./check";
+import { levelOf } from "./level";
 import { all, one, run, getSettings } from "./db";
 
 const DAY = 86_400_000;
@@ -101,7 +102,7 @@ export async function nextItem(sessionId: number, segment: Segment): Promise<Nex
     const qs = JSON.parse(ch.questions) as { skillId: string; level: 2 | 3; problem: Problem }[];
     const q = qs[ch.idx];
     const item = await makePending({ mode: "challenge", skillId: q.skillId, level: q.level, problem: q.problem, challengeId: ch.id, sessionId });
-    return { item: { ...item, skillTitle: `Grade ${ch.grade} Challenge`, progress: { idx: Number(ch.idx), total: Number(ch.total) } } };
+    return { item: { ...item, skillTitle: `Level ${levelOf(Number(ch.grade))} Challenge`, progress: { idx: Number(ch.idx), total: Number(ch.total) } } };
   }
   const checks = Object.values(states).filter((s) => s.status === "check").map((s) => SKILL[s.id]).sort((a, b) => a.grade - b.grade);
   if (checks.length) return { item: await makePending({ mode: "check", skillId: checks[0].id, level: 2, problem: checks[0].gen(Math.random, 2), sessionId }) };

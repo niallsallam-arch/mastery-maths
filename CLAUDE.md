@@ -46,10 +46,11 @@ Goal: take her through Grades 3 to 8 to genuine mastery, so she is solid at Grad
 - Canadian/British spelling in all UI copy. No m-dashes. Plain, calm, no superlatives.
 - Any new skill needs: prerequisites, a generator for levels 1–3, steps, and must pass the generator tests.
 - Never let the AI decide correctness.
+- Student-facing copy never says "Grade". Grades 3–8 are shown to Amira as Levels 1–6 via `src/lib/level.ts`. The parent dashboard and the data keep real grades.
 
 ## Status and next phases
 - Phase 1 done: skill map (number, operations, fractions, decimals and percents, algebra, plus circles, squares/roots, Pythagoras), engine, sessions, challenges, rewards, parent dashboard.
 - Open: confirm reward amounts and the proposal message to Amira; her interests (for AI theming); IEP check; LAC teacher to review the skill list against BC curriculum.
-- Deploy: GitHub → Vercel; Turso database; env vars per `.env.example`.
+- Deployed 2026-11-19: GitHub `main` → Vercel (auto-redeploys on merge); Turso database; env vars per `.env.example` set in Vercel. Vercel Install Command is overridden to `npm install --legacy-peer-deps`.
 - Phase 2: remaining BC strands (geometry and measurement, data and probability, financial literacy); AI word problems themed to her interests with code-verified answers; fact-fluency heatmap.
 - Phase 3: richer waste-meter coaching, weekly AI report by email, possible tutor voice.
