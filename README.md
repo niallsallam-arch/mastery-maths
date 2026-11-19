@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mastery Maths
 
-## Getting Started
+A private maths mastery platform for one student, built on the Alpha School mastery model:
+grade challenges passed only at 100%, hole-filling for every miss, fact fluency to speed,
+spaced re-checks, game film, and a focus (waste) meter. Content follows the BC Mathematics
+curriculum, Grades 3 to 8 (number, operations, fractions, decimals and percents, algebra, plus
+circles, squares and roots, and the Pythagorean theorem).
 
-First, run the development server:
+## How a session runs (20 minutes standard, 10 minute fallback)
+1. Fact sprint (about 15%): multiplication and division to 12 × 12, trained to under 3 seconds (Leitner boxes).
+2. Check-back (up to 15%): spaced re-checks of mastered skills at 1, 7 and 21 days.
+3. Main work: grade challenge, or hole-filling on skills missed in a challenge.
+4. Game film (last 10%): she labels each miss as a slip or "didn't know how".
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Only active time counts (tab visible, input within the last minute).
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Rules
+- Grade challenge: 2 questions per skill at grade standard. 100% passes the grade and records the reward.
+- A missed skill reopens for practice. Mastery: at least 8 grade-level questions, 90%+ of the last 10, last one right, within the speed limit for fluency skills.
+- Difficulty adapts per skill to keep her near 80–85% correct.
+- Below 50% over 8 questions: the skill's prerequisites are re-checked (traces gaps downward).
+- Every answer is computed and marked in code. Claude only explains (after a wrong answer, with a guard that the explanation contains the correct answer) and writes the weekly parent summary. There is no chat box.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Run locally
+    npm install --legacy-peer-deps
+    npm run dev          # http://localhost:3000  (dev passcodes: amira / parent)
+    npx vitest run       # 131 tests: every generator, 400 problems per skill per level
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deploy (Vercel + Turso)
+1. Push this folder to a private GitHub repo.
+2. Create a Turso database (free tier): `turso db create mastery`, then get its URL and a token.
+3. Import the repo in Vercel and set the environment variables in `.env.example`.
+4. Open `/` for Amira and `/parent` for the dashboard.
