@@ -86,3 +86,12 @@ Claude: at the end of any session that changes the project, add a dated entry he
 - Vercel runs the app and holds the secrets. It is not where content goes.
 - Generate documents like the skill list from the code, so they cannot drift from what the app does.
 - Keep one home for each thing. The repository holds the code and this journal; Drive holds copies for people who will never open GitHub. The Drive copy of the journal is refreshed when a new entry is added.
+
+## 2026-11-19 · 7. Clearing test data before the first real session
+
+**What happened.** The deploy checks in entry 4 included answering a question wrong on the live site. That answer landed inside the Level 1 challenge, which the app saves so it can be resumed. Left alone, Amira's first session would have opened part-way through a challenge she could no longer pass at 100%. The fix was to empty the progress tables in the Turso SQL console (`attempts`, `sessions`, `challenges`, `rewards`, `pending`, `skill_state`, `fact_state`), leaving `settings` alone.
+
+**Lessons.**
+- Testing on the live site writes to the real record. Either test with throwaway data you plan to clear, or clear it before the real user starts.
+- In the Turso console, the Run button ran only the statement under the cursor. Each line has its own run arrow; check the tables afterwards to confirm they are empty.
+- Never run those deletes once she has started. There is no undo.
