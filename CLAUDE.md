@@ -33,6 +33,9 @@ Goal: take her through Grades 3 to 8 to genuine mastery, so she is solid at Grad
 - Pages: `/` student home, `/session` session runner (fact sprint → check-back → main → game film), `/parent` dashboard and settings.
 - Dev shortcut: `/session?skip=1` jumps to main work (development only).
 
+## Build journal
+- `docs/build-journal.md` documents the build for teaching others. Add a dated entry at the end of every session that changes the project.
+
 ## Commands
 - `npm install --legacy-peer-deps`
 - `npm run dev` (dev passcodes: amira / parent)
