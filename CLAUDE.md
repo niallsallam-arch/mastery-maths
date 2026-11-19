@@ -50,6 +50,6 @@ Goal: take her through Grades 3 to 8 to genuine mastery, so she is solid at Grad
 ## Status and next phases
 - Phase 1 done: skill map (number, operations, fractions, decimals and percents, algebra, plus circles, squares/roots, Pythagoras), engine, sessions, challenges, rewards, parent dashboard.
 - Open: confirm reward amounts and the proposal message to Amira; her interests (for AI theming); IEP check; LAC teacher to review the skill list against BC curriculum.
-- Deploy: GitHub → Vercel; Turso database; env vars per `.env.example`.
+- Deployed 2026-11-19: GitHub `main` → Vercel (auto-redeploys on merge); Turso database; env vars per `.env.example` set in Vercel. Vercel Install Command is overridden to `npm install --legacy-peer-deps`.
 - Phase 2: remaining BC strands (geometry and measurement, data and probability, financial literacy); AI word problems themed to her interests with code-verified answers; fact-fluency heatmap.
 - Phase 3: richer waste-meter coaching, weekly AI report by email, possible tutor voice.

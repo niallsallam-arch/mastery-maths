@@ -32,3 +32,33 @@ Claude: at the end of any session that changes the project, add a dated entry he
 3. Opened the repository in Claude Code (see the next entry).
 
 **Lesson.** `CLAUDE.md` is the project's memory. Anything a future session must know (rules, constraints, conventions, what's next) goes there, not in chat.
+
+## 2026-11-19 · 4. Deploying to Vercel
+
+**Before the session.** In the Claude Code desktop app, the Cloud option was greyed out until a cloud environment existed. Creating one fixed it: New environment → Cloud → Add environment. After that the repository could be opened in a cloud session.
+
+**What happened.** Claude read `CLAUDE.md` and this journal, checked the code for anything that would affect a deploy, and wrote a plan. It then walked through the deploy one step at a time, waiting for a "done" before giving the next step. The app built first time, in 31 seconds, and is live at a private `vercel.app` address behind the two passcodes.
+
+**Steps.**
+1. Turso: signed up with GitHub, created a database called `mastery-maths` in AWS US East, copied the `libsql://` URL and created a read and write token with no expiry. The app creates its own tables on first use, so there was nothing to set up inside the database.
+2. Anthropic Console: added a small credit balance with auto-reload off, set a monthly spend limit, and created an API key named `mastery-maths`.
+3. Chose a short student passcode, a long parent passcode, and a random session secret generated with `openssl rand -hex 32`.
+4. Vercel: Add New → Project, imported the repository (Vercel's GitHub app was given access to this one repository only), kept the Next.js preset, and overrode the Install Command to `npm install --legacy-peer-deps`.
+5. Added seven environment variables on the same screen before deploying: `STUDENT_PASSCODE`, `PARENT_PASSCODE`, `SESSION_SECRET`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`.
+6. Clicked Deploy.
+7. Verified in a private browser window: the old development passcodes were rejected; the student login worked; the student could not open `/parent`; a deliberately wrong answer produced an AI explanation; and the parent dashboard showed that attempt afterwards. All five passed.
+
+**What each piece is for.**
+- Vercel runs the app but keeps no files between requests, so progress has to live in a hosted database. That is Turso's job.
+- Environment variables hand secrets to the app without writing them in the code. The names must match exactly, because the code looks them up by name.
+- The passcodes are the only lock on the site. The session secret is never typed by anyone: it signs the login cookie so a login cannot be forged. Changing it later logs everyone out.
+- The Anthropic key is billed by usage, separately from a Claude subscription. If it is missing or out of credit the app still works and shows the built-in worked steps.
+- Once the repository is connected, anything merged to `main` redeploys automatically.
+
+**Lessons.**
+- Secrets go from a private note straight into Vercel. They never go into the chat with Claude or into the repository.
+- Set the environment variables before the first deploy. A build can succeed with them missing; the site only fails later, when someone tries to log in.
+- A successful build proves the code compiled, nothing more. Each outside service needs its own check: a login for the passcodes, a saved attempt for the database, an explanation for the API key.
+- Ask Claude to read the code for deploy problems before starting. It found two things the Vercel screens would not have flagged: the install command needed a flag, and the app would not complain about a missing session secret.
+- A spend limit and a prepaid balance on the API account cap the cost if a key ever leaks.
+- Going one step at a time, with a confirmation between each, meant nothing had to be undone.
