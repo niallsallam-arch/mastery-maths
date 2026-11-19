@@ -35,6 +35,7 @@ Goal: take her through Grades 3 to 8 to genuine mastery, so she is solid at Grad
 
 ## Build journal
 - `docs/build-journal.md` documents the build for teaching others. Add a dated entry at the end of every session that changes the project.
+- A reading copy of the journal and the LAC teacher skill list live in Niall's Google Drive folder `mastery-maths` (folder id `1GNPbrlNMAuTy5Eg-tiaT1o2bl_nUilvT`). After adding a journal entry, refresh the Drive copy if the Drive connector is available. The repo is the source of truth.
 
 ## Commands
 - `npm install --legacy-peer-deps`

@@ -72,3 +72,26 @@ Claude: at the end of any session that changes the project, add a dated entry he
 **How it was checked.** Type check, the 131 tests, a production build, and a screenshot of the home page logged in as the student.
 
 **Lesson.** Wording is a design decision. The same ladder motivates or deflates depending on what the rungs are called, and the person who knows the student is the one who spots it.
+
+## 2026-11-19 · 6. A skill list for the teacher, and where things live
+
+**What happened.** Asked where her interests, the IEP, the teacher review and her current level should go. The answer was four different places, and only one of them is the app.
+
+- Her interests go in the parent dashboard, in the settings box that themes the AI explanations.
+- The IEP goes nowhere as a document. The relevant accommodations are described to Claude in a session, and the app is checked against them. Nothing from it is stored in the repository.
+- The teacher review runs the other way: the teacher needs something to review. Claude generated a list of the 43 skills by grade straight from the skill map in the code, with what each skill builds on, a blank column for notes, and four questions for the teacher. It was saved as a Google Doc in a private Drive folder, alongside a copy of this journal.
+- Her current level is not entered anywhere. The first challenge finds it.
+
+**Lessons.**
+- Vercel runs the app and holds the secrets. It is not where content goes.
+- Generate documents like the skill list from the code, so they cannot drift from what the app does.
+- Keep one home for each thing. The repository holds the code and this journal; Drive holds copies for people who will never open GitHub. The Drive copy of the journal is refreshed when a new entry is added.
+
+## 2026-11-19 · 7. Clearing test data before the first real session
+
+**What happened.** The deploy checks in entry 4 included answering a question wrong on the live site. That answer landed inside the Level 1 challenge, which the app saves so it can be resumed. Left alone, Amira's first session would have opened part-way through a challenge she could no longer pass at 100%. The fix was to empty the progress tables in the Turso SQL console (`attempts`, `sessions`, `challenges`, `rewards`, `pending`, `skill_state`, `fact_state`), leaving `settings` alone.
+
+**Lessons.**
+- Testing on the live site writes to the real record. Either test with throwaway data you plan to clear, or clear it before the real user starts.
+- In the Turso console, the Run button ran only the statement under the cursor. Each line has its own run arrow; check the tables afterwards to confirm they are empty.
+- Never run those deletes once she has started. There is no undo.
