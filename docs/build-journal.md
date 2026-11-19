@@ -72,3 +72,17 @@ Claude: at the end of any session that changes the project, add a dated entry he
 **How it was checked.** Type check, the 131 tests, a production build, and a screenshot of the home page logged in as the student.
 
 **Lesson.** Wording is a design decision. The same ladder motivates or deflates depending on what the rungs are called, and the person who knows the student is the one who spots it.
+
+## 2026-11-19 · 6. A skill list for the teacher, and where things live
+
+**What happened.** Asked where her interests, the IEP, the teacher review and her current level should go. The answer was four different places, and only one of them is the app.
+
+- Her interests go in the parent dashboard, in the settings box that themes the AI explanations.
+- The IEP goes nowhere as a document. The relevant accommodations are described to Claude in a session, and the app is checked against them. Nothing from it is stored in the repository.
+- The teacher review runs the other way: the teacher needs something to review. Claude generated a list of the 43 skills by grade straight from the skill map in the code, with what each skill builds on, a blank column for notes, and four questions for the teacher. It was saved as a Google Doc in a private Drive folder, alongside a copy of this journal.
+- Her current level is not entered anywhere. The first challenge finds it.
+
+**Lessons.**
+- Vercel runs the app and holds the secrets. It is not where content goes.
+- Generate documents like the skill list from the code, so they cannot drift from what the app does.
+- Keep one home for each thing. The repository holds the code and this journal; Drive holds copies for people who will never open GitHub. The Drive copy of the journal is refreshed when a new entry is added.
