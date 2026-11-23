@@ -10,9 +10,10 @@ type Data = {
   facts: { fluent: number; total: number };
   rewards: { id: number; grade: number; amount: number; earned: number; paid: number | null }[];
   week: { attempts: number; accuracy: number | null; focus: number | null; careless: number; labelled: number };
-  settings: { rewards: Record<string, number>; currency: string; interests: string; autoRead: boolean; minutes: number; shortMinutes: number; ai: boolean; name: string };
+  settings: { rewards: Record<string, number>; currency: string; interests: string; autoRead: boolean; minutes: number; shortMinutes: number; ai: boolean; name: string; timeMultiplier: number; calculator: boolean };
   ai: boolean;
-  attempts: { ts: number; skill: string; mode: string; correct: number; ms: number; flags: string; label: string; prompt: string; response: string; answer: string }[];
+  sessions: { id: number; started: number; minutes: number; active_ms: number; questions: number; breaks: number; prompted: number; break_seconds: number }[];
+  attempts: { ts: number; skill: string; mode: string; correct: number; ms: number; flags: string; label: string; prompt: string; response: string; answer: string; calc: number | null }[];
 };
 
 const STATUS: Record<string, [string, string]> = {
@@ -96,7 +97,7 @@ export default function Parent() {
           const f = new FormData(e.currentTarget);
           const rewards: Record<string, number> = {};
           for (const g of [3, 4, 5, 6, 7, 8]) rewards[String(g)] = Number(f.get(`r${g}`)) || 0;
-          await api("parent/settings", { rewards, currency: f.get("currency"), interests: f.get("interests"), autoRead: f.get("autoRead") === "on", ai: f.get("ai") === "on", minutes: Number(f.get("minutes")), shortMinutes: Number(f.get("shortMinutes")), name: f.get("name") });
+          await api("parent/settings", { rewards, currency: f.get("currency"), interests: f.get("interests"), autoRead: f.get("autoRead") === "on", ai: f.get("ai") === "on", minutes: Number(f.get("minutes")), shortMinutes: Number(f.get("shortMinutes")), name: f.get("name"), timeMultiplier: Number(f.get("timeMultiplier")), calculator: f.get("calculator") === "on" });
           setSaved(true); setTimeout(() => setSaved(false), 2000); load();
         }}>
           <fieldset>
@@ -116,22 +117,49 @@ export default function Parent() {
             <label className="flex gap-2 items-center text-sm"><input type="checkbox" name="autoRead" defaultChecked={s.autoRead} /> Read every question aloud automatically</label>
             <label className="flex gap-2 items-center text-sm"><input type="checkbox" name="ai" defaultChecked={s.ai} /> AI explanations after a wrong answer</label>
           </div>
+          <fieldset className="md:col-span-2 border-t border-line pt-4">
+            <legend className="font-medium mb-2">Learner settings</legend>
+            <div className="flex flex-wrap gap-x-8 gap-y-3 items-end">
+              <label className="text-sm">Extra time on speed targets<input name="timeMultiplier" type="number" min={1} max={2} step={0.1} defaultValue={s.timeMultiplier} className="block w-24 border border-line rounded-lg px-2 py-1 bg-paper" /><span className="text-soft">1.0 to 2.0. Fact target is now {Math.round(3 * s.timeMultiplier * 10) / 10} s.</span></label>
+              <label className="flex gap-2 items-center text-sm pb-6"><input type="checkbox" name="calculator" defaultChecked={s.calculator} /> Calculator on applied problems</label>
+            </div>
+          </fieldset>
           <div><Button type="submit">{saved ? "Saved" : "Save settings"}</Button></div>
         </form>
+      </Card>
+
+      <Card className="mb-6">
+        <h2 className="text-xl font-semibold mb-3">Recent sessions</h2>
+        {d.sessions.length === 0 ? <p className="text-soft">No sessions yet.</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-soft text-left"><tr><th className="py-1">When</th><th>Planned</th><th>Active</th><th>Questions</th><th>Breaks</th><th>Break time</th></tr></thead>
+              <tbody>
+                {d.sessions.map((x) => (
+                  <tr key={x.id} className="border-t border-line">
+                    <td className="py-1 pr-2 whitespace-nowrap">{new Date(x.started).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
+                    <td className="pr-2">{x.minutes} min</td><td className="pr-2">{Math.round(x.active_ms / 60_000)} min</td><td className="pr-2">{x.questions}</td>
+                    <td className="pr-2">{x.breaks}{x.prompted > 0 ? ` (${x.prompted} prompted)` : ""}</td><td>{x.breaks ? `${Math.round(x.break_seconds / 6) / 10} min` : "–"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       <Card>
         <h2 className="text-xl font-semibold mb-3">Recent answers</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-soft text-left"><tr><th className="py-1">When</th><th>Skill</th><th>Mode</th><th>Question</th><th>Her answer</th><th>Right</th><th>Secs</th><th>Flags</th></tr></thead>
+            <thead className="text-soft text-left"><tr><th className="py-1">When</th><th>Skill</th><th>Mode</th><th>Question</th><th>Her answer</th><th>Right</th><th>Secs</th><th>Calc</th><th>Flags</th></tr></thead>
             <tbody>
               {d.attempts.slice(0, 80).map((a, i) => (
                 <tr key={i} className="border-t border-line">
                   <td className="py-1 pr-2 whitespace-nowrap">{new Date(a.ts).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
                   <td className="pr-2">{a.skill}</td><td className="pr-2">{a.mode}</td><td className="pr-2">{a.prompt}</td>
                   <td className={`pr-2 ${a.correct ? "" : "text-rose"}`}>{a.response}</td><td className="pr-2">{a.correct ? "✓" : a.answer}</td>
-                  <td className="pr-2">{(a.ms / 1000).toFixed(1)}</td><td>{[a.flags?.replace(/^,/, ""), a.label].filter(Boolean).join(" ")}</td>
+                  <td className="pr-2">{(a.ms / 1000).toFixed(1)}</td><td className="pr-2">{a.calc ? "Used" : ""}</td><td>{[a.flags?.replace(/^,/, ""), a.label].filter(Boolean).join(" ")}</td>
                 </tr>
               ))}
             </tbody>

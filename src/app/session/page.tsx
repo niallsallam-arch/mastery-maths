@@ -4,12 +4,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, Button, Card, FractionBar, SpeakButton, speak } from "@/components/ui";
 import { levelOf } from "@/lib/level";
+import { BreakScreen, Calculator, Checkpoint, Example, MidpointOffer, WorkedExample } from "@/components/learner";
 
-type Item = { id: string; mode: string; skillTitle?: string; grade?: number; prompt: string; speak: string; kind: string; choices?: string[]; unit?: string; visual?: { type: "fractionBar"; parts: number; shaded: number }; progress?: { idx: number; total: number } };
-type Intro = { grade: number; total: number; reward: number; currency: string; retake: boolean };
-type Result = { correct: boolean; answer: string; feedback?: string; steps: string[]; attemptId: number; coach?: string; factMs?: number; fluent?: boolean; event?: any };
+type Item = { id: string; mode: string; skillTitle?: string; grade?: number; prompt: string; speak: string; kind: string; choices?: string[]; unit?: string; visual?: { type: "fractionBar"; parts: number; shaded: number }; progress?: { idx: number; total: number; block: number; blocks: number; q: number; blockSize: number }; calculator?: boolean };
+type Intro = { grade: number; total: number; blocks: number; reward: number; currency: string; retake: boolean };
+type Check = { block: number; blocks: number; done: number; total: number };
+type Result = { correct: boolean; answer: string; feedback?: string; steps: string[]; attemptId: number; coach?: string; factMs?: number; fluent?: boolean; factBestMs?: number; checkpoint?: Check; event?: any };
 type FilmItem = { id: number; prompt: string; answer: string; response: string };
 type Segment = "facts" | "review" | "main";
+
+const secs = (ms: number) => (ms / 1000).toFixed(1);
+/** Fact feedback: her time against her own recent best for that fact. */
+function factFlash(r: Result) {
+  const base = `Correct · ${secs(r.factMs!)} s`;
+  const versus = r.factBestMs === undefined ? "first time" : r.factMs! < r.factBestMs ? `new best (was ${secs(r.factBestMs)} s)` : `your best ${secs(r.factBestMs)} s`;
+  return `${base} · ${versus}${r.fluent ? " ⚡" : ""}`;
+}
 
 const SEG_LABEL: Record<string, string> = { facts: "Fact sprint", review: "Quick check-back", main: "Main work", film: "Game film" };
 
@@ -23,7 +33,7 @@ function Session() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [minutes, setMinutes] = useState(20);
   const [autoRead, setAutoRead] = useState(false);
-  const [phase, setPhase] = useState<"loading" | "item" | "feedback" | "intro" | "challengeDone" | "film" | "summary">("loading");
+  const [phase, setPhase] = useState<"loading" | "item" | "feedback" | "intro" | "challengeDone" | "film" | "summary" | "break" | "offer" | "checkpoint" | "example">("loading");
   const [segment, setSegment] = useState<Segment | "film">("facts");
   const [item, setItem] = useState<Item | null>(null);
   const [intro, setIntro] = useState<Intro | null>(null);
@@ -35,19 +45,25 @@ function Session() {
   const [film, setFilm] = useState<FilmItem[]>([]);
   const [stats, setStats] = useState({ n: 0, c: 0, fast: 0, mastered: [] as string[] });
   const [idle, setIdle] = useState(false);
+  const [factTarget, setFactTarget] = useState(3000);
+  const [checkpoint, setCheckpoint] = useState<Check | null>(null);
+  const [example, setExample] = useState<Example | null>(null);
 
   const active = useRef(0), lastInput = useRef(Date.now()), shownAt = useRef(0), feedbackAt = useRef(0), busy = useRef(false), reviewEmpty = useRef(false);
+  // Learner settings state: breaks pause the clock; the calculator flag is per question.
+  const paused = useRef(false), midOffered = useRef(false), calcOpened = useRef(false), pendingCheck = useRef<Check | null>(null), prefer = useRef<{ skillId: string; avoid: string } | null>(null);
+  const brk = useRef<{ id: Promise<number | null>; started: number; resume: "item" | "next" } | null>(null);
   const total = minutes * 60_000;
   const bounds = { facts: Math.max(2, Math.round(minutes * 0.15)) * 60_000, review: 0, film: total - Math.max(1, Math.round(minutes * 0.1)) * 60_000 };
   bounds.review = bounds.facts + Math.max(1, Math.round(minutes * 0.15)) * 60_000;
 
-  // Active-time clock: only counts while the tab is visible and she has touched the keyboard or mouse in the last minute.
+  // Active-time clock: only counts while the tab is visible, she has touched the keyboard or mouse in the last minute, and she is not on a break.
   useEffect(() => {
     const touch = () => { lastInput.current = Date.now(); setIdle(false); };
     window.addEventListener("keydown", touch); window.addEventListener("pointerdown", touch);
     const t = setInterval(() => {
       const quiet = Date.now() - lastInput.current;
-      if (document.visibilityState === "visible" && quiet < 60_000) active.current += 1000;
+      if (!paused.current && document.visibilityState === "visible" && quiet < 60_000) active.current += 1000;
       if (quiet > 45_000) setIdle(true);
     }, 1000);
     return () => { clearInterval(t); window.removeEventListener("keydown", touch); window.removeEventListener("pointerdown", touch); };
@@ -57,7 +73,7 @@ function Session() {
   useEffect(() => {
     (async () => {
       try {
-        const st = await api("state"); setAutoRead(st.settings.autoRead);
+        const st = await api("state"); setAutoRead(st.settings.autoRead); if (st.settings.factTargetMs) setFactTarget(st.settings.factTargetMs);
         const s = await api("session/start", { short }); setMinutes(s.minutes);
         if (devSkip) { active.current = Math.round(s.minutes * 0.3) * 60_000 + 60_000; reviewEmpty.current = true; }
         setSessionId(s.sessionId);
@@ -73,9 +89,11 @@ function Session() {
     return "film";
   }, [bounds.facts, bounds.review, bounds.film]);
 
-  const advance = useCallback(async () => {
+  const advance = useCallback(async (skipOffer = false) => {
     if (!sessionId) return;
     const seg = pickSegment();
+    // Once per session, at the halfway mark, offer a break between questions.
+    if (!skipOffer && !midOffered.current && seg !== "film" && active.current >= total / 2) { midOffered.current = true; setPhase("offer"); return; }
     setSegment(seg);
     setResult(null); setAiText(undefined); setAnswer(""); setFlash(null);
     if (seg === "film") {
@@ -84,11 +102,44 @@ function Session() {
       if (!f.items.length) api("tick", { sessionId, activeMs: active.current, end: true });
       return;
     }
-    const r = await api("next", { sessionId, segment: seg });
-    if (r.empty) { reviewEmpty.current = true; return advance(); }
+    const r = await api("next", { sessionId, segment: seg, prefer: prefer.current?.skillId, avoid: prefer.current?.avoid });
+    prefer.current = null;
+    if (r.empty) { reviewEmpty.current = true; return advance(true); }
+    if (r.example) { setExample(r.example); setPhase("example"); if (autoRead) speak(r.example.speak); return; }
     if (r.intro) { setIntro(r.intro); setPhase("intro"); return; }
-    if (r.item) { setItem(r.item); setPhase("item"); shownAt.current = Date.now(); if (autoRead) speak(r.item.speak); }
-  }, [sessionId, pickSegment, autoRead]);
+    if (r.item) { calcOpened.current = false; setItem(r.item); setPhase("item"); shownAt.current = Date.now(); if (autoRead) speak(r.item.speak); }
+  }, [sessionId, pickSegment, autoRead, total]);
+
+  // After an answer: a finished challenge block shows its checkpoint first.
+  function afterAnswer() {
+    busy.current = false;
+    if (pendingCheck.current) {
+      setCheckpoint(pendingCheck.current); pendingCheck.current = null;
+      if (active.current >= total / 2) midOffered.current = true; // the checkpoint already offers a break
+      setPhase("checkpoint");
+      return;
+    }
+    advance();
+  }
+
+  // Breaks pause the active-time clock and are logged. "item" returns to the same question; "next" moves on.
+  function startBreak(kind: "self" | "prompted", resume: "item" | "next") {
+    if (busy.current || !sessionId) return;
+    paused.current = true;
+    brk.current = { id: api<{ id: number }>("break/start", { sessionId, kind }).then((x) => x.id).catch(() => null), started: Date.now(), resume };
+    setPhase("break");
+  }
+  function endBreak() {
+    const b = brk.current;
+    if (!b) return;
+    brk.current = null;
+    const elapsed = Date.now() - b.started;
+    b.id.then((id) => { if (id !== null) api("break/end", { id, seconds: Math.round(elapsed / 1000) }).catch(() => {}); });
+    paused.current = false; lastInput.current = Date.now(); setIdle(false);
+    // Break time is not counted in the answer time. A fact is swapped for a new one so fact times stay honest.
+    if (b.resume === "item" && item && item.mode !== "fact") { shownAt.current += elapsed; setPhase("item"); }
+    else advance(true);
+  }
 
   useEffect(() => { if (sessionId) advance(); }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -96,15 +147,16 @@ function Session() {
     if (!item || busy.current || !resp.trim()) return;
     busy.current = true;
     try {
-      const r = await api<Result>("answer", { itemId: item.id, response: resp, ms: Date.now() - shownAt.current });
+      const r = await api<Result>("answer", { itemId: item.id, response: resp, ms: Date.now() - shownAt.current, calc: calcOpened.current });
+      pendingCheck.current = r.checkpoint ?? null;
       setStats((s) => ({ n: s.n + 1, c: s.c + (r.correct ? 1 : 0), fast: s.fast + (r.fluent ? 1 : 0), mastered: r.event?.type === "mastered" ? [...s.mastered, r.event.skill] : s.mastered }));
       if (r.event?.type === "mastered") showToast(`Mastered: ${r.event.skill}`);
       if (r.event?.type === "traced") showToast(`Let's shore up the basics first: ${r.event.skills.join(", ")}`);
       if (r.event?.type === "reopened") showToast(`${r.event.skill} needs a refresh. Back on the list.`);
       if (r.event?.type === "challengeDone") { setResult(r); setPhase("challengeDone"); return; }
       if (r.correct && !r.feedback) {
-        setFlash(r.fluent ? `Correct · ${(r.factMs! / 1000).toFixed(1)} s ⚡` : r.factMs ? `Correct · ${(r.factMs / 1000).toFixed(1)} s` : "Correct");
-        setTimeout(() => { busy.current = false; advance(); }, item.mode === "fact" ? 550 : 900);
+        setFlash(r.factMs ? factFlash(r) : "Correct");
+        setTimeout(afterAnswer, item.mode === "fact" ? 1100 : 900);
         return;
       }
       setResult(r); setPhase("feedback"); feedbackAt.current = Date.now();
@@ -119,7 +171,7 @@ function Session() {
       const r = await api<{ skipped: boolean }>("explain-time", { attemptId: result.attemptId, ms: Date.now() - feedbackAt.current });
       if (r.skipped) showToast("Read the explanation through before moving on. That's where the learning happens.");
     }
-    busy.current = false; advance();
+    afterAnswer();
   }
   function showToast(t: string) { setToast(t); setTimeout(() => setToast(null), 4500); }
 
@@ -138,8 +190,8 @@ function Session() {
       {phase === "item" && item && (
         <Card className="pop">
           <div className="flex justify-between items-center text-soft text-base mb-4">
-            <span>{item.mode === "fact" ? "Fast facts: aim for under 3 seconds" : item.skillTitle}</span>
-            {item.progress && <span>Question {item.progress.idx + 1} of {item.progress.total}</span>}
+            <span>{item.mode === "fact" ? `Fast facts: beat your own best. Target ${Number(secs(factTarget))} seconds` : item.skillTitle}</span>
+            {item.progress && <span>Block {item.progress.block} · question {item.progress.q} of {item.progress.blockSize}</span>}
           </div>
           <div className="flex items-start gap-4 mb-6">
             <SpeakButton text={item.speak} />
@@ -161,7 +213,20 @@ function Session() {
           )}
           {item.kind === "fraction" && !flash && <p className="text-soft text-base mt-3">Type fractions like 3/4, and mixed numbers like 1 3/4.</p>}
           {idle && !flash && <p className="text-soft text-base mt-4">Stuck? Tap the speaker to hear it again, or give it your best try. A wrong answer is useful.</p>}
+          {!flash && (
+            <div className="flex justify-between items-end gap-4 mt-6 pt-4 border-t border-line">
+              <div>{item.calculator && <Calculator key={item.id} onOpen={() => { calcOpened.current = true; }} />}</div>
+              <Button kind="quiet" onClick={() => startBreak("self", "item")}>Take a break</Button>
+            </div>
+          )}
         </Card>
+      )}
+
+      {phase === "break" && <BreakScreen onDone={endBreak} />}
+      {phase === "offer" && <MidpointOffer onBreak={() => startBreak("prompted", "next")} onContinue={() => advance(true)} />}
+      {phase === "checkpoint" && checkpoint && <Checkpoint {...checkpoint} onBreak={() => startBreak("prompted", "next")} onContinue={() => advance(true)} />}
+      {phase === "example" && example && (
+        <WorkedExample key={example.skillId + example.prompt} example={example} onDone={async () => { await api("example/done", { skillId: example.skillId }).catch(() => {}); prefer.current = { skillId: example.skillId, avoid: example.prompt }; advance(true); }} />
       )}
 
       {phase === "feedback" && result && item && (
@@ -194,10 +259,10 @@ function Session() {
         <Card className="pop text-center py-10">
           <div className="text-soft uppercase tracking-wider text-sm">{intro.retake ? "Retake" : "Challenge"}</div>
           <h2 className="text-4xl font-semibold my-2">Level {levelOf(intro.grade)}</h2>
-          <p className="text-xl mb-1">{intro.total} questions. Get every one right to pass.</p>
+          <p className="text-xl mb-1">{intro.total} questions{intro.blocks > 1 ? ` in ${intro.blocks} short blocks` : ""}. Get every one right to pass.</p>
           {intro.reward > 0 && <p className="text-2xl font-semibold text-gold mb-6">100% earns {intro.currency}{intro.reward}</p>}
           <p className="text-soft mb-6">No rush. You can stop part way and carry on next time.</p>
-          <Button kind="gold" className="text-xl px-8 py-4" onClick={async () => { await api("challenge/start", { grade: intro.grade }); advance(); }}>Start the challenge</Button>
+          <Button kind="gold" className="text-xl px-8 py-4" onClick={async () => { await api("challenge/start", { grade: intro.grade }); advance(true); }}>Start the challenge</Button>
         </Card>
       )}
 

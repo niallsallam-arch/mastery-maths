@@ -28,12 +28,15 @@ export interface Skill {
   title: string;
   prereqs: string[];
   fluencyMs?: number;        // answers slower than this don't count toward mastery
+  calculatorOk?: boolean;    // applied problems only: the on-screen calculator may be offered
   gen: (rng: Rng, level: 1 | 2 | 3) => Problem;
 }
 
 const times = "×", div = "÷";
 const cmp = (a: number, b: number) => (Math.abs(a - b) < 1e-9 ? "=" : a > b ? ">" : "<");
-const say = (s: string) => s.replace(/×/g, " times ").replace(/÷/g, " divided by ").replace(/−/g, " minus ").replace(/(\d)\/(\d)/g, "$1 over $2");
+export const say = (s: string) => s.replace(/×/g, " times ").replace(/÷/g, " divided by ").replace(/−/g, " minus ").replace(/(\d)\/(\d)/g, "$1 over $2");
+/** Read-aloud version of a worked step, where symbols read badly. */
+export const sayStep = (s: string) => say(s).replace(/²/g, " squared").replace(/√/g, " the square root of ").replace(/π/g, " pi ").replace(/≈/g, " is about ").replace(/=/g, " equals ").replace(/☐/g, " box ").replace(/\s+/g, " ").trim();
 const neg = (n: number) => (n < 0 ? `(−${Math.abs(n)})` : String(n));
 const minus = (n: number) => (n < 0 ? `−${Math.abs(n)}` : String(n));
 
@@ -270,7 +273,7 @@ export const SKILLS: Skill[] = [
     },
   },
   {
-    id: "g6.percent", grade: 6, strand: "Decimals & percents", title: "Whole-number percents and discounts", prereqs: ["g4.decimals", "g6.facts12"],
+    id: "g6.percent", grade: 6, strand: "Decimals & percents", title: "Whole-number percents and discounts", prereqs: ["g4.decimals", "g6.facts12"], calculatorOk: true,
     gen: (rng, l) => {
       const p = pick(rng, [10, 20, 25, 50, 75, 30, 40] as const), base = pick(rng, [20, 40, 60, 80, 100, 120, 200] as const);
       const part = (p * base) / 100;
@@ -352,7 +355,7 @@ export const SKILLS: Skill[] = [
     },
   },
   {
-    id: "g7.circle", grade: 7, strand: "Geometry", title: "Circumference and area of circles", prereqs: ["g7.decops"],
+    id: "g7.circle", grade: 7, strand: "Geometry", title: "Circumference and area of circles", prereqs: ["g7.decops"], calculatorOk: true,
     gen: (rng, l) => {
       const r = ri(rng, 2, 10);
       if (l < 3) return { prompt: `A circle has a radius of ${r} cm. What is its circumference? Use π = 3.14.`, speak: `A circle has a radius of ${r} centimetres. What is its circumference? Use pi equals 3.14.`, answer: fmt(2 * 3.14 * r), kind: "number", tol: 0.05, unit: "cm", steps: [`Circumference = 2 ${times} π ${times} r.`, `2 ${times} 3.14 ${times} ${r} = ${fmt(2 * 3.14 * r)} cm`] };
@@ -409,14 +412,14 @@ export const SKILLS: Skill[] = [
     },
   },
   {
-    id: "g8.percentx", grade: 8, strand: "Decimals & percents", title: "Percents below 1% and above 100%", prereqs: ["g7.fdp", "g7.decops"],
+    id: "g8.percentx", grade: 8, strand: "Decimals & percents", title: "Percents below 1% and above 100%", prereqs: ["g7.fdp", "g7.decops"], calculatorOk: true,
     gen: (rng) => {
       const p = pick(rng, [0.5, 0.2, 0.1, 150, 125, 200, 250, 120] as const), base = pick(rng, [20, 40, 60, 80, 200, 400, 1000] as const);
       return { prompt: `What is ${p}% of ${base}?`, speak: `What is ${p} percent of ${base}?`, answer: fmt((p * base) / 100), kind: "number", steps: [`${p}% as a decimal is ${fmt(p / 100)}.`, `${fmt(p / 100)} ${times} ${base} = ${fmt((p * base) / 100)}`] };
     },
   },
   {
-    id: "g8.proportion", grade: 8, strand: "Algebra", title: "Rates and proportions", prereqs: ["g6.ratio", "g7.decops"],
+    id: "g8.proportion", grade: 8, strand: "Algebra", title: "Rates and proportions", prereqs: ["g6.ratio", "g7.decops"], calculatorOk: true,
     gen: (rng, l) => {
       if (l < 3) {
         const n = ri(rng, 2, 8), unit = pick(rng, [0.25, 0.5, 0.75, 1.25, 1.5, 2.5] as const), m = ri(rng, 3, 12);
@@ -437,7 +440,7 @@ export const SKILLS: Skill[] = [
     },
   },
   {
-    id: "g8.pythag", grade: 8, strand: "Geometry", title: "Pythagorean theorem", prereqs: ["g8.squares"],
+    id: "g8.pythag", grade: 8, strand: "Geometry", title: "Pythagorean theorem", prereqs: ["g8.squares"], calculatorOk: true,
     gen: (rng, l) => {
       const t = pick(rng, [[3, 4, 5], [5, 12, 13], [6, 8, 10], [8, 15, 17], [9, 12, 15], [7, 24, 25]] as const);
       if (l === 1) return { prompt: `A right triangle has legs of ${t[0]} cm and ${t[1]} cm. How long is the hypotenuse?`, speak: `A right triangle has legs of ${t[0]} and ${t[1]} centimetres. How long is the longest side, the hypotenuse?`, answer: String(t[2]), kind: "number", unit: "cm", steps: [`a² + b² = c²`, `${t[0] ** 2} + ${t[1] ** 2} = ${t[2] ** 2}`, `c = √${t[2] ** 2} = ${t[2]} cm`] };
