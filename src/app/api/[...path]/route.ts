@@ -5,6 +5,7 @@ import * as E from "@/lib/engine";
 import { getSettings, saveSettings, one, run } from "@/lib/db";
 import { explain, parentSummary, aiAvailable } from "@/lib/ai";
 import { SKILL } from "@/lib/skills";
+import { factTargetMs } from "@/lib/rules";
 
 export const dynamic = "force-dynamic";
 const ok = (d: unknown) => NextResponse.json(d);
@@ -29,8 +30,8 @@ async function handle(req: NextRequest, path: string[]) {
   if (route.startsWith("parent/")) {
     if ((await currentRole()) !== "parent") return deny();
     if (route === "parent/overview") {
-      const [ov, settings, attempts] = await Promise.all([E.overview(), getSettings(), E.recentAttempts(200)]);
-      return ok({ ...ov, settings, ai: aiAvailable(), attempts: attempts.map((a) => ({ ...a, skill: SKILL[a.skill_id]?.title ?? a.skill_id })) });
+      const [ov, settings, attempts, sessions] = await Promise.all([E.overview(), getSettings(), E.recentAttempts(200), E.recentSessions(12)]);
+      return ok({ ...ov, settings, ai: aiAvailable(), sessions, attempts: attempts.map((a) => ({ ...a, skill: SKILL[a.skill_id]?.title ?? a.skill_id })) });
     }
     if (route === "parent/settings") { await saveSettings(body); return ok(await getSettings()); }
     if (route === "parent/paid") { await run("UPDATE rewards SET paid = ? WHERE id = ?", [Date.now(), body.id]); return ok({}); }
@@ -47,17 +48,20 @@ async function handle(req: NextRequest, path: string[]) {
   switch (route) {
     case "state": {
       const [ov, s] = await Promise.all([E.overview(), getSettings()]);
-      return ok({ ...ov, settings: { name: s.name, autoRead: s.autoRead, minutes: s.minutes, shortMinutes: s.shortMinutes, currency: s.currency, rewards: s.rewards } });
+      return ok({ ...ov, settings: { name: s.name, autoRead: s.autoRead, minutes: s.minutes, shortMinutes: s.shortMinutes, currency: s.currency, rewards: s.rewards, factTargetMs: factTargetMs(s.timeMultiplier) } });
     }
     case "session/start": {
       const s = await getSettings();
       const minutes = body.short ? s.shortMinutes : s.minutes;
       return ok({ sessionId: await E.startSession(minutes), minutes });
     }
-    case "next": return ok(await E.nextItem(Number(body.sessionId), body.segment));
+    case "next": return ok(await E.nextItem(Number(body.sessionId), body.segment, typeof body.prefer === "string" ? body.prefer : undefined, typeof body.avoid === "string" ? body.avoid : undefined));
+    case "example/done": await E.completeExample(String(body.skillId)); return ok({});
+    case "break/start": return ok({ id: await E.startBreak(Number(body.sessionId), body.kind === "prompted" ? "prompted" : "self") });
+    case "break/end": await E.endBreak(Number(body.id), Number(body.seconds)); return ok({});
     case "challenge/start": return ok({ id: await E.startChallenge(Number(body.grade)) });
     case "answer": {
-      const r = await E.submit(String(body.itemId), String(body.response ?? ""), Number(body.ms) || 0);
+      const r = await E.submit(String(body.itemId), String(body.response ?? ""), Number(body.ms) || 0, body.calc === true);
       return r ? ok(r) : NextResponse.json({ error: "expired" }, { status: 410 });
     }
     case "explain": {

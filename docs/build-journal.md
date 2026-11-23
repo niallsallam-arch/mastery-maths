@@ -75,10 +75,10 @@ Claude: at the end of any session that changes the project, add a dated entry he
 
 ## 2026-11-19 · 6. A skill list for the teacher, and where things live
 
-**What happened.** Asked where her interests, the IEP, the teacher review and her current level should go. The answer was four different places, and only one of them is the app.
+**What happened.** Asked where her interests, any learner settings, the teacher review and her current level should go. The answer was four different places, and only one of them is the app.
 
 - Her interests go in the parent dashboard, in the settings box that themes the AI explanations.
-- The IEP goes nowhere as a document. The relevant accommodations are described to Claude in a session, and the app is checked against them. Nothing from it is stored in the repository.
+- Learner settings are described to Claude in a session and built into the app. No personal or school records are stored in the repository.
 - The teacher review runs the other way: the teacher needs something to review. Claude generated a list of the 43 skills by grade straight from the skill map in the code, with what each skill builds on, a blank column for notes, and four questions for the teacher. It was saved as a Google Doc in a private Drive folder, alongside a copy of this journal.
 - Her current level is not entered anywhere. The first challenge finds it.
 
@@ -95,3 +95,31 @@ Claude: at the end of any session that changes the project, add a dated entry he
 - Testing on the live site writes to the real record. Either test with throwaway data you plan to clear, or clear it before the real user starts.
 - In the Turso console, the Run button ran only the statement under the cursor. Each line has its own run arrow; check the tables afterwards to confirm they are empty.
 - Never run those deletes once she has started. There is no undo.
+
+## 2026-11-23 · 8. Learner settings
+
+**What happened.** Asked for six adjustable supports in one update, starting in Plan mode so nothing changed until the plan was agreed. Claude read the code, asked two questions, wrote a plan, and built it after approval.
+
+**What was built.**
+1. Extra time. A parent setting, "Extra time on speed targets" (1.0 to 2.0, default 1.5), multiplies every speed target: the 3-second fact target and each skill's own target. Fact feedback now shows her time against her own recent best for that fact.
+2. Breaks. A "Take a break" button on every question, a calm one-minute break screen she can leave early, and a single "Halfway. Want a 1-minute break?" offer mid-session. Breaks pause the session clock and are logged; the parent dashboard has a new table of recent sessions with the break count.
+3. Chunked challenges. Challenges are split into blocks of up to 6 questions with a checkpoint between blocks. The checkpoint shows how many questions are done, not the score, and offers a break. The counter reads "Block 2 · question 3 of 6".
+4. Worked example first. When a skill opens for practice, she first watches one solved problem, a step at a time, with a read-aloud button on each step. Then the first practice question is on that same skill.
+5. Calculator on applied problems. Five skills (percents, circles, rates, Pythagoras) can show an on-screen calculator. Facts and arithmetic never do. The dashboard shows when it was used.
+6. Reading level. The instructions given to the AI for explanations now ask for short common words and a quick definition of any maths term.
+
+**Decisions made in the plan.**
+- "Blocks of 6" would have left a 2-question final block on two levels, so blocks are balanced: 8 questions become 4 + 4, 14 become 5 + 5 + 4.
+- When the break minute ends, the screen waits for her and does not jump back by itself.
+- After a break on a fact question she gets a new fact, so fact times stay honest.
+- The calculator never fills in the answer box.
+
+**How it was checked.** 153 automated tests (131 before). New ones cover the time multiplier on mastery and fact fluency, the list of calculator skills, block boundaries, and the calculator's own arithmetic. Several drive the real engine against a throwaway database. Then a production build, and screenshots of each new screen from a local run.
+
+**Lessons.**
+- Start a large change in Plan mode. The plan surfaced two things worth deciding before any code existed: the awkward 2-question block, and what "extra time" should and should not touch.
+- Be exact about what must not change. "Do not change the rushed threshold" and "never on arithmetic skills" each became a test, so a later change cannot quietly undo them.
+- Changing a live database needs care. New columns are added only if missing, existing rows are never touched, and the upgrade was rehearsed on a copy shaped like the live one, with rows in it, before anything was pushed.
+- Take screenshots from a scratch database, never the real one. Entry 7 is why.
+- Looking at the screenshots found two things the tests did not: the first practice question could repeat the worked example, and the calculator had no bracket keys.
+- Keep personal context out of the repository. Settings are described by what they do. The code, comments, commit messages and this journal say nothing about why.

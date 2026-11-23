@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Dyslexia-friendly defaults: Lexend, warm off-white page, dark (not black) ink,
+/* Low reading load defaults: Lexend, warm off-white page, dark (not black) ink,
    generous line and letter spacing, no italics, left-aligned text. */
 :root {
   --paper: #fbf7ef;

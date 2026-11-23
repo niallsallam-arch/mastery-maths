@@ -1,4 +1,5 @@
 import { createClient, Client, InValue } from "@libsql/client";
+import { clampMultiplier, DEFAULT_TIME_MULTIPLIER } from "./rules";
 
 // Local development uses a SQLite file; production uses a hosted Turso database (same SQL).
 let client: Client | null = null;
@@ -15,12 +16,28 @@ CREATE TABLE IF NOT EXISTS challenges (id INTEGER PRIMARY KEY AUTOINCREMENT, gra
 CREATE TABLE IF NOT EXISTS rewards (id INTEGER PRIMARY KEY AUTOINCREMENT, grade INTEGER NOT NULL, amount REAL NOT NULL, earned INTEGER NOT NULL, paid INTEGER);
 CREATE TABLE IF NOT EXISTS pending (id TEXT PRIMARY KEY, created INTEGER NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS breaks (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER, ts INTEGER NOT NULL, seconds INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS breaks_session ON breaks(session_id);
 `;
+
+// Columns added after the first release. Each is added only if it is missing, so an existing database
+// upgrades itself on first use and keeps every row it already has.
+const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
+  ["attempts", "calc", "INTEGER"],          // 1 if the on-screen calculator was opened for this answer
+  ["skill_state", "example_at", "INTEGER"], // when the worked example was last completed for this learning period
+];
+async function migrate(c: Client) {
+  await c.executeMultiple(SCHEMA);
+  for (const [table, column, type] of ADDED_COLUMNS) {
+    const cols = await c.execute(`SELECT name FROM pragma_table_info('${table}')`);
+    if (!cols.rows.some((r) => r.name === column)) await c.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
 
 export async function db(): Promise<Client> {
   if (!client) {
     client = createClient({ url: process.env.TURSO_DATABASE_URL || "file:local.db", authToken: process.env.TURSO_AUTH_TOKEN });
-    ready = client.executeMultiple(SCHEMA);
+    ready = migrate(client);
   }
   await ready;
   return client;
@@ -47,6 +64,8 @@ export interface Settings {
   shortMinutes: number;              // fallback session length
   ai: boolean;
   name: string;
+  timeMultiplier: number;            // extra time on speed targets, 1.0 to 2.0
+  calculator: boolean;               // on-screen calculator on applied problems
 }
 export const DEFAULT_SETTINGS: Settings = {
   rewards: { "3": 20, "4": 30, "5": 40, "6": 60, "7": 80, "8": 120 },
@@ -57,16 +76,20 @@ export const DEFAULT_SETTINGS: Settings = {
   shortMinutes: 10,
   ai: true,
   name: "Amira",
+  timeMultiplier: DEFAULT_TIME_MULTIPLIER,
+  calculator: true,
 };
 export async function getSettings(): Promise<Settings> {
   const rows = await all<{ key: string; value: string }>("SELECT key, value FROM settings");
   const s: Settings = structuredClone(DEFAULT_SETTINGS);
   for (const r of rows) (s as unknown as Record<string, unknown>)[r.key] = JSON.parse(r.value);
+  s.timeMultiplier = clampMultiplier(s.timeMultiplier);
   return s;
 }
 export async function saveSettings(patch: Partial<Settings>) {
   for (const [k, v] of Object.entries(patch)) {
     if (!(k in DEFAULT_SETTINGS)) continue;
-    await run("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [k, JSON.stringify(v)]);
+    const val = k === "timeMultiplier" ? clampMultiplier(v) : k === "calculator" ? !!v : v;
+    await run("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [k, JSON.stringify(val)]);
   }
 }

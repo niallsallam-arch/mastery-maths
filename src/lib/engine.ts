@@ -4,47 +4,51 @@
 //  • a skill is mastered at ≥90% over its last 8–10 grade-level questions, then re-checked
 //    after 1 day, 7 days and 21 days (spaced repetition); a failed check reopens it
 //  • if a skill stays below 50%, its prerequisites are re-checked (trace the gap downward)
-//  • facts are trained to speed (≤3 s) because fluency frees working memory
+//  • facts are trained to speed (3 s, scaled by the extra-time learner setting) because fluency frees working memory
 import { randomUUID } from "crypto";
-import { SKILLS, SKILL, skillsInGrade, GRADES, Problem } from "./skills";
+import { SKILLS, SKILL, skillsInGrade, GRADES, Problem, sayStep } from "./skills";
+import { factIsFluent, masteryReached, blockInfo, blockSizes } from "./rules";
 import { check } from "./check";
 import { levelOf } from "./level";
 import { all, one, run, getSettings } from "./db";
 
 const DAY = 86_400_000;
-const FACT_FLUENT_MS = 3000;
 const FACT_INTERVALS = [0, DAY, 2 * DAY, 4 * DAY, 8 * DAY, 16 * DAY];
 export const HOURS_PER_GRADE = 22; // Alpha's figure for Grades 6 and 7 maths; used for the estimate only
 
 type Mode = "fact" | "learn" | "review" | "check" | "challenge";
 export type Segment = "facts" | "review" | "main";
 
-interface SkillRow { id: string; status: "unknown" | "learning" | "mastered" | "check"; level: number; stage: number; next_check: number | null; mastered_at: number | null; since: number | null; traced: number | null }
+interface SkillRow { id: string; status: "unknown" | "learning" | "mastered" | "check"; level: number; stage: number; next_check: number | null; mastered_at: number | null; since: number | null; traced: number | null; example_at: number | null }
 interface Pending { mode: Mode; skillId?: string; level: number; problem: Problem; challengeId?: number; fact?: string; sessionId: number }
 
 export interface ClientItem {
   id: string; mode: Mode; skillTitle?: string; grade?: number;
   prompt: string; speak: string; kind: Problem["kind"]; choices?: string[]; unit?: string; visual?: Problem["visual"];
-  progress?: { idx: number; total: number };
+  progress?: { idx: number; total: number; block: number; blocks: number; q: number; blockSize: number };
+  calculator?: boolean;      // the on-screen calculator may be offered on this question
 }
-export type NextResult = { item: ClientItem } | { intro: { grade: number; total: number; reward: number; currency: string; retake: boolean } } | { empty: true } | { finished: true };
+/** A worked example shown once before the first practice question of a learning period. Never marked. */
+export interface WorkedExample { skillId: string; skillTitle: string; prompt: string; speak: string; unit?: string; visual?: Problem["visual"]; steps: { text: string; speak: string }[] }
+export type NextResult = { item: ClientItem } | { example: WorkedExample } | { intro: { grade: number; total: number; blocks: number; reward: number; currency: string; retake: boolean } } | { empty: true } | { finished: true };
 
 // ── skill state helpers
 async function skillState(id: string): Promise<SkillRow> {
-  return (await one<SkillRow>("SELECT * FROM skill_state WHERE id = ?", [id])) ?? { id, status: "unknown", level: 1, stage: 0, next_check: null, mastered_at: null, since: null, traced: null };
+  return (await one<SkillRow>("SELECT * FROM skill_state WHERE id = ?", [id])) ?? { id, status: "unknown", level: 1, stage: 0, next_check: null, mastered_at: null, since: null, traced: null, example_at: null };
 }
 async function setSkill(id: string, p: Partial<SkillRow>) {
   const cur = await skillState(id);
   const n = { ...cur, ...p };
-  await run("INSERT INTO skill_state(id,status,level,stage,next_check,mastered_at,since,traced) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status, level=excluded.level, stage=excluded.stage, next_check=excluded.next_check, mastered_at=excluded.mastered_at, since=excluded.since, traced=excluded.traced", [id, n.status, n.level, n.stage, n.next_check, n.mastered_at, n.since, n.traced]);
+  await run("INSERT INTO skill_state(id,status,level,stage,next_check,mastered_at,since,traced,example_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status, level=excluded.level, stage=excluded.stage, next_check=excluded.next_check, mastered_at=excluded.mastered_at, since=excluded.since, traced=excluded.traced, example_at=excluded.example_at", [id, n.status, n.level, n.stage, n.next_check, n.mastered_at, n.since, n.traced, n.example_at ?? null]);
 }
 const markMastered = (id: string, now: number) => setSkill(id, { status: "mastered", stage: 1, next_check: now + DAY, mastered_at: now, since: now });
-const markLearning = (id: string, now: number) => setSkill(id, { status: "learning", level: 1, stage: 0, next_check: null, since: now });
+// A new learning period starts here, so the worked example is due again.
+const markLearning = (id: string, now: number) => setSkill(id, { status: "learning", level: 1, stage: 0, next_check: null, since: now, example_at: null });
 
 async function allStates(): Promise<Record<string, SkillRow>> {
   const rows = await all<SkillRow>("SELECT * FROM skill_state");
   const m: Record<string, SkillRow> = {};
-  for (const s of SKILLS) m[s.id] = { id: s.id, status: "unknown", level: 1, stage: 0, next_check: null, mastered_at: null, since: null, traced: null };
+  for (const s of SKILLS) m[s.id] = { id: s.id, status: "unknown", level: 1, stage: 0, next_check: null, mastered_at: null, since: null, traced: null, example_at: null };
   for (const r of rows) m[r.id] = r;
   return m;
 }
@@ -68,7 +72,8 @@ async function makePending(p: Pending): Promise<ClientItem> {
   await run("DELETE FROM pending WHERE created < ?", [Date.now() - DAY]);
   await run("INSERT INTO pending(id, created, payload) VALUES(?,?,?)", [id, Date.now(), JSON.stringify(p)]);
   const sk = p.skillId ? SKILL[p.skillId] : undefined;
-  return { id, mode: p.mode, skillTitle: sk?.title, grade: sk?.grade, prompt: p.problem.prompt, speak: p.problem.speak ?? p.problem.prompt, kind: p.problem.kind, choices: p.problem.choices, unit: p.problem.unit, visual: p.problem.visual };
+  const calculator = !!sk?.calculatorOk && (await getSettings()).calculator;
+  return { id, mode: p.mode, skillTitle: sk?.title, grade: sk?.grade, prompt: p.problem.prompt, speak: p.problem.speak ?? p.problem.prompt, kind: p.problem.kind, choices: p.problem.choices, unit: p.problem.unit, visual: p.problem.visual, calculator };
 }
 
 async function openChallenge() {
@@ -78,7 +83,7 @@ async function passedGrades(): Promise<Set<number>> {
   return new Set((await all<{ grade: number }>("SELECT DISTINCT grade FROM challenges WHERE passed = 1")).map((r) => Number(r.grade)));
 }
 
-export async function nextItem(sessionId: number, segment: Segment): Promise<NextResult> {
+export async function nextItem(sessionId: number, segment: Segment, prefer?: string, avoidPrompt?: string): Promise<NextResult> {
   const now = Date.now();
   if (segment === "facts") {
     await ensureFacts();
@@ -102,7 +107,7 @@ export async function nextItem(sessionId: number, segment: Segment): Promise<Nex
     const qs = JSON.parse(ch.questions) as { skillId: string; level: 2 | 3; problem: Problem }[];
     const q = qs[ch.idx];
     const item = await makePending({ mode: "challenge", skillId: q.skillId, level: q.level, problem: q.problem, challengeId: ch.id, sessionId });
-    return { item: { ...item, skillTitle: `Level ${levelOf(Number(ch.grade))} Challenge`, progress: { idx: Number(ch.idx), total: Number(ch.total) } } };
+    return { item: { ...item, skillTitle: `Level ${levelOf(Number(ch.grade))} Challenge`, progress: { idx: Number(ch.idx), total: Number(ch.total), ...blockProgress(Number(ch.idx), Number(ch.total)) } } };
   }
   const checks = Object.values(states).filter((s) => s.status === "check").map((s) => SKILL[s.id]).sort((a, b) => a.grade - b.grade);
   if (checks.length) return { item: await makePending({ mode: "check", skillId: checks[0].id, level: 2, problem: checks[0].gen(Math.random, 2), sessionId }) };
@@ -114,9 +119,14 @@ export async function nextItem(sessionId: number, segment: Segment): Promise<Nex
     const pool = frontier.length ? frontier : learning;
     const minG = Math.min(...pool.map((s) => SKILL[s.id].grade));
     const g = pool.filter((s) => SKILL[s.id].grade === minG);
-    const s = g[Math.floor(Math.random() * g.length)];
+    // After a worked example, the first practice question is on that same skill.
+    const s = learning.find((x) => x.id === prefer) ?? g[Math.floor(Math.random() * g.length)];
+    if (!s.example_at) return { example: workedExample(s.id) };
     const lvl = Math.max(1, Math.min(3, Number(s.level))) as 1 | 2 | 3;
-    return { item: await makePending({ mode: "learn", skillId: s.id, level: lvl, problem: SKILL[s.id].gen(Math.random, lvl), sessionId }) };
+    // The first practice question should not be the worked example she has just watched.
+    let problem = SKILL[s.id].gen(Math.random, lvl);
+    for (let i = 0; i < 12 && avoidPrompt && problem.prompt === avoidPrompt; i++) problem = SKILL[s.id].gen(Math.random, lvl);
+    return { item: await makePending({ mode: "learn", skillId: s.id, level: lvl, problem, sessionId }) };
   }
 
   const passed = await passedGrades();
@@ -128,7 +138,24 @@ export async function nextItem(sessionId: number, segment: Segment): Promise<Nex
   }
   const settings = await getSettings();
   const tried = await one("SELECT id FROM challenges WHERE grade = ? LIMIT 1", [grade]);
-  return { intro: { grade, total: skillsInGrade(grade).length * 2, reward: settings.rewards[String(grade)] ?? 0, currency: settings.currency, retake: !!tried } };
+  const total = skillsInGrade(grade).length * 2;
+  return { intro: { grade, total, blocks: blockSizes(total).length, reward: settings.rewards[String(grade)] ?? 0, currency: settings.currency, retake: !!tried } };
+}
+
+function blockProgress(idx: number, total: number) {
+  const b = blockInfo(idx, total);
+  return { block: b.block, blocks: b.blocks, q: b.q, blockSize: b.blockSize };
+}
+
+function workedExample(skillId: string): WorkedExample {
+  const sk = SKILL[skillId], p = sk.gen(Math.random, 1);
+  return { skillId, skillTitle: sk.title, prompt: p.prompt, speak: p.speak ?? p.prompt, unit: p.unit, visual: p.visual, steps: p.steps.map((text) => ({ text, speak: sayStep(text) })) };
+}
+/** She has gone through the worked example: do not show it again in this learning period. */
+export async function completeExample(skillId: string) {
+  if (!SKILL[skillId]) return;
+  const st = await skillState(skillId);
+  if (st.status === "learning" && !st.example_at) await setSkill(skillId, { example_at: Date.now() });
 }
 
 export async function startChallenge(grade: number) {
@@ -143,28 +170,35 @@ export async function startChallenge(grade: number) {
 export interface SubmitResult {
   correct: boolean; answer: string; feedback?: string; steps: string[]; attemptId: number;
   coach?: string; factMs?: number; fluent?: boolean;
+  factBestMs?: number;       // her fastest correct time on this fact over her previous 5 correct tries
+  checkpoint?: { block: number; blocks: number; done: number; total: number }; // a challenge block has just been completed
   event?: { type: "mastered"; skill: string } | { type: "reopened"; skill: string } | { type: "traced"; skills: string[] } | { type: "challengeDone"; grade: number; correct: number; total: number; passed: boolean; reward: number; currency: string; holes: string[] };
 }
 
-export async function submit(itemId: string, response: string, ms: number): Promise<SubmitResult | null> {
+export async function submit(itemId: string, response: string, ms: number, calcOpened = false): Promise<SubmitResult | null> {
   const row = await one<{ payload: string }>("SELECT payload FROM pending WHERE id = ?", [itemId]);
   if (!row) return null;
   await run("DELETE FROM pending WHERE id = ?", [itemId]);
   const p = JSON.parse(row.payload) as Pending;
   const now = Date.now();
+  const settings = await getSettings();
+  const mult = settings.timeMultiplier;
   const res = check(p.problem, response);
+  const calc = calcOpened && settings.calculator && !!(p.skillId && SKILL[p.skillId]?.calculatorOk);
   const flags: string[] = [];
   let coach: string | undefined;
   if (!res.correct && p.mode !== "fact" && ms < 2500 && !res.feedback) { flags.push("rushed"); coach = "That was very quick. Slow down and read it twice. Speed comes later."; }
 
-  const ins = await run("INSERT INTO attempts(ts, session_id, skill_id, mode, level, prompt, answer, response, correct, ms, flags, payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-    [now, p.sessionId, p.skillId ?? `fact:${p.fact}`, p.mode, p.level, p.problem.prompt, p.problem.answer, response, res.correct ? 1 : 0, ms, flags.join(","), JSON.stringify({ steps: p.problem.steps, visual: p.problem.visual })]);
+  const ins = await run("INSERT INTO attempts(ts, session_id, skill_id, mode, level, prompt, answer, response, correct, ms, flags, payload, calc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    [now, p.sessionId, p.skillId ?? `fact:${p.fact}`, p.mode, p.level, p.problem.prompt, p.problem.answer, response, res.correct ? 1 : 0, ms, flags.join(","), JSON.stringify({ steps: p.problem.steps, visual: p.problem.visual }), calc ? 1 : 0]);
   const out: SubmitResult = { correct: res.correct, answer: p.problem.answer, feedback: res.feedback, steps: p.problem.steps, attemptId: Number(ins.lastInsertRowid), coach };
 
   if (p.mode === "fact" && p.fact) {
     const f = await one<{ box: number }>("SELECT box FROM fact_state WHERE fact = ?", [p.fact]);
     let box = Number(f?.box ?? 0);
-    const fluent = res.correct && ms <= FACT_FLUENT_MS;
+    const fluent = factIsFluent(res.correct, ms, mult);
+    const earlier = await all<{ ms: number }>("SELECT ms FROM attempts WHERE skill_id = ? AND mode = 'fact' AND correct = 1 AND id < ? ORDER BY id DESC LIMIT 5", [`fact:${p.fact}`, out.attemptId]);
+    if (earlier.length) out.factBestMs = Math.min(...earlier.map((r) => Number(r.ms)));
     box = !res.correct ? 0 : fluent ? Math.min(5, box + 1) : box;
     await run("UPDATE fact_state SET box = ?, last_ms = ?, due = ?, seen = seen + 1 WHERE fact = ?", [box, ms, now + (res.correct ? FACT_INTERVALS[box] : 0), p.fact]);
     out.factMs = ms; out.fluent = fluent;
@@ -196,9 +230,7 @@ export async function submit(itemId: string, response: string, ms: number): Prom
   if (p.mode === "learn") {
     const since = st.since ?? 0;
     const graded = await all<{ correct: number; ms: number }>("SELECT correct, ms FROM attempts WHERE skill_id = ? AND mode = 'learn' AND level >= 2 AND ts >= ? ORDER BY ts DESC LIMIT 10", [id, since]);
-    const counts = graded.map((r) => Number(r.correct) === 1 && (!sk.fluencyMs || Number(r.ms) <= sk.fluencyMs));
-    const hits = counts.filter(Boolean).length;
-    if (graded.length >= 8 && hits >= Math.ceil(graded.length * 0.9) && counts[0]) {
+    if (masteryReached(graded.map((r) => ({ correct: Number(r.correct) === 1, ms: Number(r.ms) })), sk.fluencyMs, mult)) {
       await markMastered(id, now);
       out.event = { type: "mastered", skill: sk.title };
     } else {
@@ -224,8 +256,11 @@ export async function submit(itemId: string, response: string, ms: number): Prom
   if (p.mode === "challenge" && p.challengeId) {
     const ch = (await one<{ id: number; grade: number; idx: number; total: number; correct: number }>("SELECT id, grade, idx, total, correct FROM challenges WHERE id = ?", [p.challengeId]))!;
     const idx = Number(ch.idx) + 1, correct = Number(ch.correct) + (res.correct ? 1 : 0), total = Number(ch.total);
-    if (idx < total) await run("UPDATE challenges SET idx = ?, correct = ? WHERE id = ?", [idx, correct, ch.id]);
-    else {
+    if (idx < total) {
+      await run("UPDATE challenges SET idx = ?, correct = ? WHERE id = ?", [idx, correct, ch.id]);
+      const b = blockInfo(idx - 1, total);
+      if (b.lastInBlock && !b.lastBlock) out.checkpoint = { block: b.block, blocks: b.blocks, done: idx, total };
+    } else {
       const passed = correct === total;
       await run("UPDATE challenges SET idx = ?, correct = ?, finished = ?, passed = ? WHERE id = ?", [idx, correct, now, passed ? 1 : 0, ch.id]);
       const results = await all<{ skill_id: string; correct: number }>("SELECT skill_id, correct FROM attempts WHERE mode = 'challenge' AND ts >= (SELECT started FROM challenges WHERE id = ?) AND session_id IS NOT NULL", [ch.id]);
@@ -236,7 +271,6 @@ export async function submit(itemId: string, response: string, ms: number): Prom
         if (missed.has(s.id)) { await markLearning(s.id, now); holes.push(s.title); }
         else if (cur.status !== "mastered") await markMastered(s.id, now);
       }
-      const settings = await getSettings();
       const reward = passed ? settings.rewards[String(ch.grade)] ?? 0 : 0;
       if (passed && reward > 0) await run("INSERT INTO rewards(grade, amount, earned) VALUES(?,?,?)", [ch.grade, reward, now]);
       out.event = { type: "challengeDone", grade: Number(ch.grade), correct, total, passed, reward, currency: settings.currency, holes };
@@ -265,6 +299,24 @@ export async function startSession(minutes: number) {
 }
 export async function tickSession(id: number, activeMs: number, end = false) {
   await run(`UPDATE sessions SET active_ms = MAX(active_ms, ?)${end ? ", ended = ?" : ""} WHERE id = ?`, end ? [activeMs, Date.now(), id] : [activeMs, id]);
+}
+
+// ── breaks (a learner setting: she can pause, and is offered a pause at the midpoint and between challenge blocks)
+export async function startBreak(sessionId: number, kind: "self" | "prompted") {
+  const r = await run("INSERT INTO breaks(session_id, ts, seconds, kind) VALUES(?,?,0,?)", [sessionId, Date.now(), kind === "prompted" ? "prompted" : "self"]);
+  return Number(r.lastInsertRowid);
+}
+export async function endBreak(id: number, seconds: number) {
+  await run("UPDATE breaks SET seconds = ? WHERE id = ?", [Math.max(0, Math.min(3600, Math.round(seconds) || 0)), id]);
+}
+export async function recentSessions(limit = 12) {
+  return all<{ id: number; started: number; minutes: number; active_ms: number; questions: number; breaks: number; prompted: number; break_seconds: number }>(
+    `SELECT s.id, s.started, s.minutes, s.active_ms,
+       (SELECT COUNT(*) FROM attempts a WHERE a.session_id = s.id) questions,
+       (SELECT COUNT(*) FROM breaks b WHERE b.session_id = s.id) breaks,
+       (SELECT COUNT(*) FROM breaks b WHERE b.session_id = s.id AND b.kind = 'prompted') prompted,
+       (SELECT COALESCE(SUM(b.seconds), 0) FROM breaks b WHERE b.session_id = s.id) break_seconds
+     FROM sessions s ORDER BY s.started DESC LIMIT ?`, [limit]);
 }
 
 // ── overview (student home and parent dashboard)
@@ -296,6 +348,6 @@ export async function overview() {
 }
 
 export async function recentAttempts(limit = 300) {
-  return all<{ ts: number; skill_id: string; mode: string; correct: number; ms: number; flags: string; label: string; prompt: string; response: string; answer: string }>(
-    "SELECT ts, skill_id, mode, correct, ms, flags, label, prompt, response, answer FROM attempts ORDER BY ts DESC LIMIT ?", [limit]);
+  return all<{ ts: number; skill_id: string; mode: string; correct: number; ms: number; flags: string; label: string; prompt: string; response: string; answer: string; calc: number | null }>(
+    "SELECT ts, skill_id, mode, correct, ms, flags, label, prompt, response, answer, calc FROM attempts ORDER BY ts DESC LIMIT ?", [limit]);
 }
